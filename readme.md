@@ -3,11 +3,17 @@
 *Usage
 
 *Document
+
 ** Accesstype
+
 *** RO
+
 *** WO
+
 *** RW
+
 *** RC
+
 *** WC
 
 *otherFeature

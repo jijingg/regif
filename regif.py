@@ -29,6 +29,8 @@ def checklib():
         exit(0)
     
 checklib()
+import xlrd
+from docx import Document
 
 import re
 import json

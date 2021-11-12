@@ -329,7 +329,43 @@ class IODeclars(Declars):
     def __str__(self):
         return self._joind()
         # return super().__str__() + ";"     
+
+class InstPort():
+    def __init__(self, pname, wname, io, dw = 1):
+        self.port = pname
+        self.wire = wname
+        self.io = io
+        self.pgap = 30
+        self.wgap = 30
+        self.dw = dw
+        self.islast = False
                                           
+    def __str__(self):
+        pname = self.port.ljust(self.pgap)
+        dot = " " if self.islast else ","
+        io = self.io
+        ndw = "" if(self.dw == 1) else "[{}:0]".format(self.dw-1)
+        wname = (self.wire+ndw).ljust(self.wgap+10)
+        return  "    .{} ( {} ){}//{}".format(pname, wname, dot, io)
+
+class InstPorts():
+    def __init__(self, ports):
+        self.pmax = max([len(p.port) for p in ports])
+        self.wmax = max([len(p.wire) for p in ports])
+        self.ports = list(map(self.align, ports))
+        self.ports[-1].islast = True
+
+    def align(self, s):
+        s.pgap = self.pmax + 2
+        s.wgap = self.wmax + 2
+        return s
+
+    def __str__(self):
+        return "\n".join(map(str, self.ports))
+
+    def __repr__(self):
+        return self.__str__()  
+
 class Reg:
     def __init__(self, reg, regifdict):
         self.__dict__.update(regifdict)

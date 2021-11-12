@@ -269,27 +269,42 @@ endmodule
 '''
 
 class Wire:
-    tpl = "wire   {} {}"
-    def __init__(self, name, dw, align = 30):
+    dc_name = "wire"
+    def __init__(self, name, dw = 1):
         self.name = name 
         self.dw = dw 
-        self.align = align
+        self.align = 20
 
     def __str__(self):
         ndw = "" if(self.dw == 1) else "[{}:0]".format(self.dw-1)
         ndw = ndw.center(10)
         nname = self.name.ljust(self.align)
-        return  self.tpl.format(ndw, nname)
+        dcname = self.dc_name.ljust(10)
+        return  "{} {} {}".format(dcname, ndw, nname)
                                                  
     def __repr__(self):
         return self.__str__()
 
 class Input(Wire):
-    tpl = "input  {} {}"
+    dc_name = "input"
 
 class Output(Wire):
-    tpl = "output {} {}"
+    dc_name = "output"
  
+class OutputReg(Wire):
+    dc_name = "output reg"
+
+bmiport = [
+    Input("bmi_clk"),
+    Input("bmi_rstn"),
+    Input("bmi_rd"),
+    Input("bmi_wr"),
+    Input("bmi_addr", 16),
+    Input("bmi_wdata", 32),
+    Output("bmi_rdata", 32),
+    Output("bmi_rdvld"),
+]
+
 class Declars:
     jp = ";\n"
     def __init__(self, signals):
@@ -297,19 +312,23 @@ class Declars:
         self.signals = map(self.align, signals)
 
     def align(self, s):
-        s.align = self.maxwidth
+        s.align = self.maxwidth + 2
         return s
+
+    def _joind(self):
+        return self.jp.join(map(str, self.signals))
 
     def __repr__(self):
         return self.__str__()
 
     def __str__(self):
-        return self.jp.join(map(str, self.signals))
+        return self._joind() + ";"
 
 class IODeclars(Declars):
     jp = ",\n"
     def __str__(self):
-        return super().__str__() + ";"     
+        return self._joind()
+        # return super().__str__() + ";"     
                                           
 class Reg:
     def __init__(self, reg, regifdict):

@@ -65,8 +65,8 @@ other_format = [
     (4, 5, "data_width ", r"([4-9]\Z|[1-9]\d{1,2}\Z)", "4~999 is better"),
     (6, 5, "reg_pre ", r'\"[a-zA-Z_]\w*\"\Z|\"\"\Z', '"if_","reg_","" are better')]
 # field joined check
-INPUT = "input     {bw:11}{pn:{gfd_align}} ;\n"
-OUTPUT = "output    {bw:11}{pn:{gfd_align}} ;\n"
+INPUT = "    input     {bw:11}{pn:{gfd_align}} ,\n"
+OUTPUT = "    output    {bw:11}{pn:{gfd_align}} ,\n"
 WIRE = "wire      {bw:11}{pn:{gfd_align}} ;\n"
 REG = "reg       {bw:11}{pn:{gfd_align}} ;\n"
 IPORTS = "    .{pn:{gfd_align}} ({pn2:{gfd_align}} ),//i\n"
@@ -194,18 +194,18 @@ reg                  rd_dly1        ;
         bmi_rdvld <= 1'b0  ;
     end
 '''       
-CG_IO = '''\ninput                bmi_clk_wr_cg     ;
+CG_IO = '''\n    input                bmi_clk_wr_cg     ,
 //Please instance manually outside like: 
 //gate_cell  u_RW_cg_cell(.CLK(bmi_clk), .TSE(test_mode), .E(bmi_wr), .ECK(bmi_clk_wr_cg));'''
 BMI_IO = \
-    '''input                bmi_clk           ;{}
-input                bmi_rstn          ;
-input                bmi_rd            ;
-input                bmi_wr            ;
-input    [{addr_widthp1:2}:0]      bmi_addr          ;
-input    [{data_widthp1:2}:0]      bmi_wdata         ;
-output   [{data_widthp1:2}:0]      bmi_rdata         ;
-output               bmi_rdvld         ;
+    '''    input                bmi_clk           ,{}
+    input                bmi_rstn          ,
+    input                bmi_rd            ,
+    input                bmi_wr            ,
+    input    [{addr_widthp1:2}:0]      bmi_addr          ,
+    input    [{data_widthp1:2}:0]      bmi_wdata         ,
+    output   [{data_widthp1:2}:0]      bmi_rdata         ,
+    output               bmi_rdvld         ,
 '''
 LOCK_EXPRESS_L1 = \
     "        {if_name:{fd_align}}  <= {lock_pre}{if_name:{fd_align}} ;\n"
@@ -233,11 +233,8 @@ RESET_MACRO="""
 `endif
 """
 VFILE = \
-    '''{defines}{macros}module {modulename}_regif(/*autoarg*/
-{vioports}
-);
-{bmi_io}{iodeclars}
-//======================================================
+    '''{defines}{macros}module {modulename}_regif(
+{bmi_io}{iodeclars});
 {vdeclars}
 {write_part}
 {read_part}
@@ -246,12 +243,10 @@ endmodule
 '''
 CG_PORT = "\n    .bmi_clk_wr_cg          (bmi_clk_wr_cg           ),//i"
 WFILE = \
-    '''module {modulename}_regif_wrap(/*autoarg*/
-{wioports}
-);
-input                hw_clk            ;
-input                hw_rstn           ;
-{bmi_io}{lock_io}{iodeclars}
+    '''module {modulename}_regif_wrap(
+    input                hw_clk            ,
+    input                hw_rstn           ,
+{bmi_io}{lock_io}{iodeclars});
 //======================================================
 wire   [{data_widthp1:2}:0]        bmi_rdata         ;
 wire                 bmi_rdvld         ;
@@ -273,7 +268,49 @@ wire                 bmi_rdvld         ;
 endmodule 
 '''
 
+class Wire:
+    tpl = "wire   {} {}"
+    def __init__(self, name, dw, align = 30):
+        self.name = name 
+        self.dw = dw 
+        self.align = align
 
+    def __str__(self):
+        ndw = "" if(self.dw == 1) else "[{}:0]".format(self.dw-1)
+        ndw = ndw.center(10)
+        nname = self.name.ljust(self.align)
+        return  self.tpl.format(ndw, nname)
+                                                 
+    def __repr__(self):
+        return self.__str__()
+
+class Input(Wire):
+    tpl = "input  {} {}"
+
+class Output(Wire):
+    tpl = "output {} {}"
+ 
+class Declars:
+    jp = ";\n"
+    def __init__(self, signals):
+        self.maxwidth = max([len(s.name) for s in signals])
+        self.signals = map(self.align, signals)
+
+    def align(self, s):
+        s.align = self.maxwidth
+        return s
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return self.jp.join(map(str, self.signals))
+
+class IODeclars(Declars):
+    jp = ",\n"
+    def __str__(self):
+        return super().__str__() + ";"     
+                                          
 class Reg:
     def __init__(self, reg, regifdict):
         self.__dict__.update(regifdict)
@@ -569,7 +606,7 @@ class RegFields:
         # self._outputs to prevent multiply add when the ojbects method call more than once
         self._inputs, self._outputs = [], []
         if (self.fifo_if):
-            _io = "output    {:11}{:{}} ;\n".format("", self.reg_name + "_push", self.gfd_align)
+            _io = "    output    {:11}{:{}} ,\n".format("", self.reg_name + "_push", self.gfd_align)
             self._outputs = ["{}".format(self.reg_name + "_push")]
             _port = "    .{name:{w}} ({name:{w}} ),//o\n".format(name=self.reg_name + "_push", w=self.gfd_align)
             return _io, _vdec, _wdec, _port

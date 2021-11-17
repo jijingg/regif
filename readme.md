@@ -37,7 +37,7 @@ automatic register inteface RTL generator with better excel template
 
 `pip install regif`
 
-you can also directly use `python [regif.py](http://regif.py) mymodule.xls`
+you can also directly use `python regif.py mymodule.xls`
 
 ### usage
 

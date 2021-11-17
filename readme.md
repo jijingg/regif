@@ -1,16 +1,15 @@
 <div align="center">
-<!-- Title: -->
   <a href="https://github.com/jijingg/regif/">
     <img src="https://github.com/jijingg/regif/blob/dev/img/regif-ico.png" height="100">
   </a>
   <h1>regif</h1>
 </div>
 
-![regif](img/regif.png)
-
 ## What is this
 
 automatic register inteface RTL generator with better excel template
+
+![regif](img/regif.png)
 
 ## Why
 

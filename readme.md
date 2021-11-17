@@ -1,12 +1,12 @@
 <div align="center">
 <!-- Title: -->
   <a href="https://github.com/jijingg/regif/">
-    <img src="img/regif-cio.png" height="100">
+    <img src="https://github.com/jijingg/regif/blob/dev/img/regif.png" height="100">
   </a>
   <h1>regif</h1>
 </div>
 
-![regif](regif%img/regif.png)
+![regif](img/regif.png)
 
 ## What is this
 

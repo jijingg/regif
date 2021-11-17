@@ -1,7 +1,7 @@
 <div align="center">
   <a href="https://github.com/jijingg/regif/">
     <img src="https://github.com/jijingg/regif/blob/dev/img/regif-ico.png" height="100">
-  </a>
+  </a><br>
   <a href="https://gitpod.io/#https://github.com/jijingg/regif">
     <img src="https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod&style=flat-square" height="20" alt="Gitpod Ready-to-Code">
   </a>

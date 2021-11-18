@@ -392,13 +392,13 @@ class Acc(Enum):
     WP = 7
 
 class Field:
-    def __init__(self, name, sec, acctype, rstvalue, lock_sig, desc):
+    def __init__(self, name, sec, acc, rstvalue, locksig, doc):
         self.name = name
         self.section = sec
         self.acctype = acc
-        self.rstvalue = rstvlue
+        self.rstvalue = rstvalue
         self.locksig = locksig
-        self.desc = desc
+        self.doc = doc
         self.width = sec.width
 
     def toWire(self):

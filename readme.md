@@ -8,18 +8,6 @@
   <a href="https://github.com/jijingg/regif/issues">
     <img src="https://img.shields.io/badge/issue_tracking-github-blue.svg" height="20" alt="Gitpod Ready-to-Code">
   </a>
-  <a href="https://github.com/jijingg/regif">
-    <img src="https://badge.fury.io/py/jupyterlab.svg" height="20" alt="Gitpod Ready-to-Code">
-  </a>
-  <a href="https://gitpod.io/#https://github.com/jijingg/regif">
-    <img src="https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod&style=flat-square" height="20" alt="Gitpod Ready-to-Code">
-  </a>
-  <a href="https://github.com/jijingg/regif/issues">
-    <img src="https://img.shields.io/badge/issue_tracking-github-blue.svg" height="20" alt="Gitpod Ready-to-Code">
-  </a>
-  <a href="https://github.com/jijingg/regif">
-    <img src="https://badge.fury.io/py/jupyterlab.svg" height="20" alt="Gitpod Ready-to-Code">
-  </a>
   <h1>regif</h1>
 </div>
 

@@ -11,9 +11,13 @@
 #        : 1.31(argparser supported)
 #        : 1.32(add read Group feature)
 #        : 1.33(add reset-macro)
+#        : 1.8(add reset-macro)
 
 import sys, os, json, shutil 
 import logging, re
+from typing import *
+
+from docx.api import Document
 
 def checklib():
     info = ""
@@ -21,19 +25,16 @@ def checklib():
         import xlrd
     except ImportError as e:
         info += str(e) + ", 'pip install xlrd' first!! \n"
-    # try:
-    #     from docx import Document
-    # except ImportError as e:
-    #     info += str(e) + ", 'pip install python_docx' first!! \n"
+    try:
+        from docx import Document
+    except ImportError as e:
+        info += str(e) + ", 'pip install python_docx' first!! \n"
     if(info):
         info = "Error: \n" + info 
         print(info)
         exit(0)
     
-# dependency load
 checklib()
-import xlrd
-# from docx import Document
 
 # logging 
 class CustomFormatter(logging.Formatter):
@@ -43,8 +44,8 @@ class CustomFormatter(logging.Formatter):
     red      = "\x1b[31;1m"
     bold_red = "\x1b[31;1m"
     reset    = "\x1b[0m"
-    format = "\n%(levelname)s - %(message)s"
-    # format = "\n%(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+    format = "%(levelname)s - %(message)s"
+    # format = "%(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
 
     FORMATS = {
         logging.DEBUG:    grey     + format + reset,
@@ -186,14 +187,74 @@ def intger(s: str):
     else :
         return int(s, 10)
 
+def dumpfile(path, content: str):
+    with open(path, "w") as f:
+        f.write(content)
+    log.info("{} generate done!".format(path))
+
 # excel load and parser
+class MSDoc():
+    def __init__(self, js):
+        from docx import Document
+        self.jsregs = js
+        self.doc = Document()
+
+    def filldoc(self):
+        from docx.shared import RGBColor
+        from docx.oxml.ns import qn
+        for name in self.jsregs:
+            body = self.jsregs[name]
+            self.doc.styles['Normal'].font.name = u'Times New Roman'
+            self.doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'Times New Roman')
+            self.doc.add_heading(u'{} ({})'.format(name, body["offset"]), 2)
+            self.doc.add_paragraph(u"Offset: {}".format(body["offset"]))
+            self.doc.add_paragraph(u"Description: {}".format(body["doc"]))
+            reg_table = self.creat_reg_table()
+            self.filltable(reg_table, body["fields"])
+
+    def creat_reg_table(self):
+        from docx.shared import Pt
+        from docx.shared import Cm
+        from docx.shared import Length
+        table_style = self.doc.styles["Table Grid"]
+        table_style.font.size = Pt(10.5)
+        table = self.doc.add_table(rows=1, cols=0, style=table_style)
+        aval_width = Length(self.doc._block_width).cm
+        table.add_column(Cm(aval_width * 0.1))
+        table.add_column(Cm(aval_width * 0.15))
+        table.add_column(Cm(aval_width * 0.1))
+        table.add_column(Cm(aval_width * 0.15))
+        table.add_column(Cm(aval_width * 0.45))
+        table.cell(0, 0).text = u"Width"
+        table.cell(0, 1).text = u"RegName"
+        table.cell(0, 2).text = u"AccType"
+        table.cell(0, 3).text = u"ResetValue"
+        table.cell(0, 4).text = u"Description"
+        return table
+
+    def filltable(self, table, fields):
+        for field in fields:
+            row_cells = table.add_row().cells
+            reserved = True if field["doc"] == "RESERVED" else False
+            row_cells[0].text = js2sec(field["sec"]).doc()
+            row_cells[1].text = field["name"]
+            row_cells[2].text = "N/A" if reserved else trystr(field["acc"])
+            row_cells[3].text = "N/A" if reserved else trystr(field["reset"])
+            row_cells[4].text = trystr(field["doc"])
+
+    def dump(self, name, dir = "./"):
+        self.filldoc()
+        path = os.path.join(dir, u"{}_Register_Manual.docx".format(name))
+        self.doc.save(path)
+        log.info("{} generate done!".format(path))
+
 class XLSParser():
     _regs = []
     _js = {}
     def __init__(self, bs):
         self._static_check(bs)
         self.getjson()
-        self.modulename = re.match(other_format[0][3], bs.cell(2, 1).value).group()
+        self.name = re.match(other_format[0][3], bs.cell(2, 1).value).group()
         self.aw = tryint(bs.cell(3, 5).value)
         self.dw = tryint(bs.cell(4, 5).value)
         self.amsb = int(self.aw) - 1
@@ -210,6 +271,8 @@ class XLSParser():
         self.always_ff_begin = ALWAYS_BEGIN_MACRO if(bs.cell(5,10).value.upper() == "YES") else ALWAYS_BEGIN
         self.macros = RESET_MACRO if(bs.cell(5,10).value.upper()=="YES") else ""
         self.regs = json2reg(self._js)
+        self.regif  = RegIf(self.regs, self.name, self.withcg, self.groupsize, self.macros)
+        self.outdir = "./"
         # self._dynamic_check()
 
     def __repr__(self) -> str:
@@ -270,7 +333,7 @@ class XLSParser():
 
     def _static_check(self, bs):
         self.getregs(bs)
-        print("Static check ..... ")
+        log.info("Static check ..... ")
         msg = title_check(bs)
         msg += static_check(self._regs)
         if msg:
@@ -278,20 +341,31 @@ class XLSParser():
             print(msg)
             exit(0)
         else:
-            print("Static check Pass! \n")
+            log.info("Static check Pass!")
         return
-
-    def show(self):
-        print(self._js)
 
     def dumpjson(self):
         content = json.dumps(self._js, sort_keys=False, indent=4)
-        with open("{}.json".format(self.modulename), "w") as f:
-            f.write(content)
+        jspth = os.path.join(self.outdir, "{}.json".format(self.name))
+        dumpfile(jspth, content)
+
+    def dumpdoc(self):
+        doc = MSDoc(self._js)
+        doc.dump(self.name, self.outdir)
+
+    def dumpverilog(self):
+        # self.regif.dump()
+        pass
+
+    def dump(self, args):
+        self.dumpverilog()
+        if( "--doc" in args):
+            self.dumpdoc()
+        if( "--json" in args):
+            self.dumpjson()
 
 def json2reg(js):
     return [Reg(name, js[name]) for name in js]
-
 
 def static_check(regs):
     msg = ""
@@ -379,7 +453,6 @@ class IODeclars(Declars):
     jdot = ",\n"
     def __str__(self):
         return self._joind()
-        # return super().__str__() + ";"     
 
 class InstPort():
     def __init__(self, pname, wname, io, dw = 1):
@@ -416,7 +489,6 @@ class InstPorts():
     def __repr__(self):
         return self.__str__()  
 
-
 class Reg:
     "name/offset/doc"
     def __init__(self, name, value):
@@ -429,6 +501,76 @@ class Reg:
         return self.__str__()
     def __str__(self) -> str:
         return "reg:{} {} [{}]".format(self.name, self.offset, "|".join([str(s) for s in self.fields]))
+
+    def write_str(self) -> str:
+        return ""
+    def read_str(self) -> str:
+        return ""
+
+class RegIf:
+    def __init__(self, regs, name, cg: bool, grpsize: int, rstmacro: int):
+        self.name = name
+        self.regs = regs
+        self.withcg = cg
+        self.grpsize = grpsize
+        self.withrstmacro = rstmacro
+        self.locksigs = self.getlocksigs()
+        self.withlock = not self.locksigs
+
+    def getlocksigs(self):
+        locksig = []
+        for reg in self.regs:
+            for field in reg.fields:
+                if not field.lock:
+                    locksig.append(field.lock)
+        return locksig
+
+    def io_str(self):
+        pass
+    def dec_str(self):
+        pass
+    def write_str(self):
+        pass
+    def read_str(self):
+        pass
+    def wrap_io_str(self):
+        pass
+    def wrap_lock_str(self):
+        pass
+    def wrap_dec_str(self):
+        pass
+    def wrap_inst_str(self):
+        return """
+        {name}_regif u_{name}_regif(
+            {instports}
+        );
+        """.format(**self.__dict__)
+
+    def vfile(self):
+        return """
+        module {name}_regif({iostr}); 
+        {localparam}
+        {declare}
+        {writepart}
+        {readpart}
+        endmodule
+        """.format(**self.__dict__)
+
+    def wvfile(self):
+        return """
+        module {name}_regif_wrap({iopart});
+        {declare}
+        {instance}
+        {lockpart}
+        endmodule
+        """.format(**self.__dict__)
+
+    def dump(self, path = "./"):
+        vpth = os.path.join(path, self.name + "_regif.v")
+        vwpth = os.path.join(path, self.name + "_regif_wrap.v")
+        dumpfile(vpth, self.vfile())
+        if self.withlock:
+            dumpfile(vwpth, self.wvfile())
 
 class Field:
     "sec/name/acc/reset/wp/lock/doc"
@@ -444,6 +586,11 @@ class Field:
         return self.__str__()
     def __str__(self) -> str:
         return "filed:{}{}".format(self.name, self.sec)
+
+    def write_str(self) -> str:
+        return ""
+    def read_str(self) -> str:
+        return ""
 
 def js2sec(js):
     return Section(js["msb"], js["lsb"])
@@ -482,11 +629,14 @@ class Section:
         self.msb = msb
         self.lsb = lsb
         self.width = msb - lsb + 1
+        self.single = msb == lsb
 
     def __str__(self):
         return "" if(self.msb == self.lsb)  else "[{}:{}]".format(self.msb, self.lsb)
     def __repr__(self):
         return self.__str__()  
+    def doc(self):
+        return "[{}]".format(self.msb) if(self.single)  else "[{}:{}]".format(self.msb, self.lsb)
 
 from enum import Enum
 class Acc(Enum):
@@ -514,9 +664,8 @@ def creatxls(name):
     log.info("RegIf excel template %s created\n" % dest)
 
 def task_regif(args):
+    import xlrd
     checkargs(args, "regif --init youmodule.xls")
-    withdoc = "--doc" in args
-    withjson = "--json" in args
     opt = getopt(args)
     xls = args[0]
     if (not os.path.exists(xls)):
@@ -525,8 +674,7 @@ def task_regif(args):
     wb = xlrd.open_workbook(xls)
     bs = wb.sheet_by_index(0)
     xlsreg = XLSParser(bs)
-    xlsreg.dumpjson()
-    print(xlsreg)
+    xlsreg.dump(args)
 
 def task_creat(args):
     checkargs(args, "regif --init youmodule.xls")
@@ -564,4 +712,5 @@ if __name__ == "__main__":
     try: 
         main()
     except:
+        log.error("regif crush, report to https://github.com/jijingg/regif/issues")
         raise

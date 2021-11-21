@@ -25,7 +25,7 @@ automatic register inteface RTL generator with better excel template
 **Compared with other similar tools:**
 
 1. with pretty excel template with good readability 
-2. with safety validation check, never generate broken verilog 
+2. with safety validation check(detail log), never generate broken verilog 
 3. with pretty and clear verilog code style
 4. develop with python, cross platform[windows, linux, macos]
 5. full feature(clock-gate/read-group/reset-macro/mem/fifo/)

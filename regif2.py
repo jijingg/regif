@@ -377,7 +377,7 @@ class Section:
         self.width = msb - lsb + 1
 
     def __str__(self):
-        return "" if(self.msb == self.lsb): "[{}:{}]".format(self.msb, self.lsb)
+        return "" if(self.msb == self.lsb) else "[{}:{}]".format(self.msb, self.lsb)
     def __repr__(self):
         return self.__str__()  
 

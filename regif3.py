@@ -19,6 +19,8 @@ from typing import *
 
 from docx.api import Document
 
+from regif import RWC_RST_L1
+
 def checklib():
     info = ""
     try:
@@ -30,8 +32,7 @@ def checklib():
     except ImportError as e:
         info += str(e) + ", 'pip install python_docx' first!! \n"
     if(info):
-        info = "Error: \n" + info 
-        print(info)
+        log.error(info)
         exit(0)
     
 checklib()
@@ -41,17 +42,21 @@ class CustomFormatter(logging.Formatter):
     """Logging Formatter to add colors and count warning / errors"""
     grey     = "\x1b[38;1m"
     yellow   = "\x1b[33;1m"
+    green    = "\x1b[32;1m"
     red      = "\x1b[31;1m"
     bold_red = "\x1b[31;1m"
     reset    = "\x1b[0m"
     format = "%(levelname)s - %(message)s"
     # format = "%(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
 
+    logging.SUCCESS = 25  # between WARNING and INFO
+    logging.addLevelName(logging.SUCCESS, 'SUCCESS')
     FORMATS = {
         logging.DEBUG:    grey     + format + reset,
         logging.INFO:     grey     + format + reset,
         logging.WARNING:  yellow   + format + reset,
         logging.ERROR:    red      + format + reset,
+        logging.SUCCESS:  green    + format + reset,
         logging.CRITICAL: bold_red + format + reset
     }
 
@@ -65,6 +70,7 @@ log.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
 ch.setFormatter(CustomFormatter())
 log.addHandler(ch)
+setattr(log, 'success', lambda message, *args: log._log(logging.SUCCESS, message, args))
 
 # common
 reg_format = [
@@ -190,207 +196,7 @@ def intger(s: str):
 def dumpfile(path, content: str):
     with open(path, "w") as f:
         f.write(content)
-    log.info("{} generate done!".format(path))
-
-# excel load and parser
-class MSDoc():
-    def __init__(self, js):
-        from docx import Document
-        self.jsregs = js
-        self.doc = Document()
-
-    def filldoc(self):
-        from docx.shared import RGBColor
-        from docx.oxml.ns import qn
-        for name in self.jsregs:
-            body = self.jsregs[name]
-            self.doc.styles['Normal'].font.name = u'Times New Roman'
-            self.doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'Times New Roman')
-            self.doc.add_heading(u'{} ({})'.format(name, body["offset"]), 2)
-            self.doc.add_paragraph(u"Offset: {}".format(body["offset"]))
-            self.doc.add_paragraph(u"Description: {}".format(body["doc"]))
-            reg_table = self.creat_reg_table()
-            self.filltable(reg_table, body["fields"])
-
-    def creat_reg_table(self):
-        from docx.shared import Pt
-        from docx.shared import Cm
-        from docx.shared import Length
-        table_style = self.doc.styles["Table Grid"]
-        table_style.font.size = Pt(10.5)
-        table = self.doc.add_table(rows=1, cols=0, style=table_style)
-        aval_width = Length(self.doc._block_width).cm
-        table.add_column(Cm(aval_width * 0.1))
-        table.add_column(Cm(aval_width * 0.15))
-        table.add_column(Cm(aval_width * 0.1))
-        table.add_column(Cm(aval_width * 0.15))
-        table.add_column(Cm(aval_width * 0.45))
-        table.cell(0, 0).text = u"Width"
-        table.cell(0, 1).text = u"RegName"
-        table.cell(0, 2).text = u"AccType"
-        table.cell(0, 3).text = u"ResetValue"
-        table.cell(0, 4).text = u"Description"
-        return table
-
-    def filltable(self, table, fields):
-        for field in fields:
-            row_cells = table.add_row().cells
-            reserved = True if field["doc"] == "RESERVED" else False
-            row_cells[0].text = js2sec(field["sec"]).doc()
-            row_cells[1].text = field["name"]
-            row_cells[2].text = "N/A" if reserved else trystr(field["acc"])
-            row_cells[3].text = "N/A" if reserved else trystr(field["reset"])
-            row_cells[4].text = trystr(field["doc"])
-
-    def dump(self, name, dir = "./"):
-        self.filldoc()
-        path = os.path.join(dir, u"{}_Register_Manual.docx".format(name))
-        self.doc.save(path)
-        log.info("{} generate done!".format(path))
-
-class XLSParser():
-    _regs = []
-    _js = {}
-    def __init__(self, bs):
-        self._static_check(bs)
-        self.getjson()
-        self.name = re.match(other_format[0][3], bs.cell(2, 1).value).group()
-        self.aw = tryint(bs.cell(3, 5).value)
-        self.dw = tryint(bs.cell(4, 5).value)
-        self.amsb = int(self.aw) - 1
-        self.dmsb = int(self.dw) - 1
-        self.withcg     = trybool(bs.cell(3, 10).value, "YES")
-        self.reg_pre    = trystr(bs.cell(6, 5).value).strip('"')
-        self.groupsize  = groupSize(bs.cell(4, 10).value)
-        self.unlocktype = ("RO", "RC", "RWT", "RWP", "CP", "BP")
-        self.lock_pre   = "o"
-        self.page_width = 50
-        self._hw_clc    = "_hw_clc"
-        self._hw_set    = "_hw_set"
-        self._hw_setval = "_hw_setval"
-        self.always_ff_begin = ALWAYS_BEGIN_MACRO if(bs.cell(5,10).value.upper() == "YES") else ALWAYS_BEGIN
-        self.macros = RESET_MACRO if(bs.cell(5,10).value.upper()=="YES") else ""
-        self.regs = json2reg(self._js)
-        self.regif  = RegIf(self.regs, self.name, self.withcg, self.groupsize, self.macros)
-        self.outdir = "./"
-        # self._dynamic_check()
-
-    def __repr__(self) -> str:
-        return "\n".join([str(s) for s in self.regs])
-
-    def getjson(self):
-        def sec(s):
-            ns = str2sec(s)
-            return {"msb" : ns.msb, "lsb" : ns.lsb}
-
-        def field(t):
-            return {"sec": sec(t[0]), "name":t[1], "acc" : t[2],  "reset" : trystr(t[3]), "wp": t[4], "lock": t[5], "doc":t[6]}
-
-        def reg(x):
-            regname = x[1]
-            fields = [field(t) for t in x[4]]
-            return { regname : {
-                "offset" : intger(x[0]),
-                "doc" : x[2],
-                "fields" : fields}
-            }
-
-        def tryupdate(x):
-            key = list(x.keys())[0]
-            if key in self._js:
-                log.error("{} already exits".foramt(key))
-                exit(2)
-            self._js.update(x)
-
-        [tryupdate(reg(x)) for x in self._regs]
-
-    def getregs(self, bs):
-        nrows = bs.nrows
-        ncols = bs.ncols
-        address_idx = 0
-        for i in range(9, nrows):
-            row_data = bs.row_values(i)
-            if row_data[0] != u'':
-                self._regs.append(row_data[0:4])
-                self._regs[address_idx].append([])
-                self._regs[address_idx][4].append(row_data[4:ncols])
-                address_idx += 1
-            else:
-                self._regs[address_idx - 1][4].append(row_data[4:ncols])
-
-    def _dynamic_check(self):
-        print("Dynamic check ..... ")
-        msg = ""
-        for reg in self.regs:
-            msg += reg.dynamic_check()
-        if msg:
-            msg += "\nFixed all those format Error first, then regenerate again !\n"
-            print(msg)
-            exit(0)
-        else:
-            print("Dynamic check Pass! \n")
-        return
-
-    def _static_check(self, bs):
-        self.getregs(bs)
-        log.info("Static check ..... ")
-        msg = title_check(bs)
-        msg += static_check(self._regs)
-        if msg:
-            msg += "\nFixed all those format Error first, then regenerate again !\n"
-            print(msg)
-            exit(0)
-        else:
-            log.info("Static check Pass!")
-        return
-
-    def dumpjson(self):
-        content = json.dumps(self._js, sort_keys=False, indent=4)
-        jspth = os.path.join(self.outdir, "{}.json".format(self.name))
-        dumpfile(jspth, content)
-
-    def dumpdoc(self):
-        doc = MSDoc(self._js)
-        doc.dump(self.name, self.outdir)
-
-    def dumpverilog(self):
-        # self.regif.dump()
-        pass
-
-    def dump(self, args):
-        self.dumpverilog()
-        if( "--doc" in args):
-            self.dumpdoc()
-        if( "--json" in args):
-            self.dumpjson()
-
-def json2reg(js):
-    return [Reg(name, js[name]) for name in js]
-
-def static_check(regs):
-    msg = ""
-    line = 0
-    regs_unq_msg, addrs_unq_msg, fields_unq_msg = ("",) * 3
-    regs_unq, addrs_unq, fields_unq = ([],) * 3
-    for reg in regs:
-        if reg[1] in addrs_unq:
-            addrs_unq_msg += "Error: position {:3}{}: Regname {:20} already exist\n".format(line + 10, chr(65 + 1), reg[1])
-        if reg[0] in regs_unq:
-            regs_unq_msg += "Error: position {:3}{}: Addrs   {:20} already exist\n".format(line + 10, chr(65 + 0), reg[0])
-        addrs_unq.append(reg[1])
-        regs_unq.append(reg[0])
-        for i in range(len(reg_format)):
-            strs = trystr(reg[i])
-            msg += format_check(strs, line, i, reg_format[i])
-        for field in reg[4]:
-            if field[1] in fields_unq and field[1] != "RESERVED":
-                fields_unq_msg += "Error: position {:3}{}: Field   {:20} already exist\n".format(line + 10, chr(65 + 4), field[1])
-            fields_unq.append(field[1])
-            for i in range(len(field_format)):
-                strs = trystr(field[i])
-                msg += format_check(strs, line, i + 4, field_format[i])
-            line += 1
-    return msg + regs_unq_msg + addrs_unq_msg + fields_unq_msg
+    log.success("{} generate done!".format(path))
 
 # object 
 class Wire:
@@ -489,13 +295,68 @@ class InstPorts():
     def __repr__(self):
         return self.__str__()  
 
+class Field:
+    "sec/name/acc/reset/wp/lock/doc"
+    def __init__(self, fieldjs):
+        'deep copy is very important unless it will silence change fieldjs dict'
+        import copy
+        js = copy.deepcopy(fieldjs)
+        js["sec"] = js2sec(js["sec"])
+        self.raw_reset = js["reset"]
+        js["reset"] = resetvalue(self.raw_reset)
+        self.__dict__.update(js)
+        self.max_val = 1 << self.sec.width
+
+    def __repr__(self) -> str:
+        return self.__str__()
+    def __str__(self) -> str:
+        return "filed:{}{}".format(self.name, self.sec)
+
+    def write_str(self) -> str:
+        return ""
+    def read_str(self) -> str:
+        return ""
+    def io(self):
+        iolist = []
+        return iolist
+    def dec(self):
+        declist = []
+        return declist
+    def reset_check(self, pre):
+        msg = ""
+        cm = re.match("(\d+)'(d|h|b)([\da-fA-F]+)", self.raw_reset)
+        if cm and self.sec.width != int(cm.group(1)):
+            msg =  "{pre}field {name:10} width {sec.width} don't match it reset value \"{raw_reset}\" \n".format(pre = pre, **self.__dict__)
+        if self.reset > (self.max_val - 1):
+            max = 1 << self.sec.width - 1
+            msg += "{pre}field {name:10} reset value {raw_reset} exceed max value \"{max}\"\n".format(pre = pre, max = max, **self.__dict__)
+        return msg
+
+"RW/RO/WO/RWP/RWT/RC/WC/RWC/RWW"
+
 class Reg:
     "name/offset/doc"
-    def __init__(self, name, value):
-        self.name = name
-        self.offset = value["offset"]
-        self.doc = value["doc"]
-        self.fields = [Field(fd) for fd in value["fields"]]
+    def __init__(self, name, body, dw = 32):
+        self.name = name.strip()
+        self.offset = body["offset"]
+        self.doc = body["doc"]
+        self.fields = self.getfields(body["fields"]) 
+        self.signamemax = max([len(fd.name) for fd in self.fields])
+        self.io = self.getiosignals()
+        self.align = 30
+        self.dw = dw
+
+    def getfields(self, fdjs):
+        ret = [Field(fd) for fd in fdjs]
+        ret.reverse()
+        return ret
+
+    def upsigalign(self, l):
+        for fd in self.fields:
+            fd.align = l
+
+    def getiosignals(self):
+        pass
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -506,6 +367,60 @@ class Reg:
         return ""
     def read_str(self) -> str:
         return ""
+    def io_str(self) -> str:
+        return ""
+
+    def dynamic_check(self) :
+        pre = "Error: reg {name:{align}} ".format(**self.__dict__)
+        msg = self.sec_continue_check(pre)
+        fdrstck = [fd.reset_check(pre) for fd in self.fields]
+        nfd = [fd for fd in fdrstck if fd]
+        msg += "\n".join(nfd)
+        return msg
+
+    def sec_continue_check(self, pre):
+        msg = ""
+        s0 = self.fields[0]
+        sm = self.fields[-1]
+        render_dict = self.__dict__
+        render_dict.update(locals())
+        if s0.sec.lsb != 0:
+            msg += "{pre}first section {s0} not begin with 0 \n".format(**render_dict)
+        if sm.sec.msb != self.dw - 1:
+            msg += "{pre}last section {sm} not end with {dw}\n".format(**render_dict)
+        if len(self.fields) > 1:
+            for i in range(1, len(self.fields)):
+                sp = self.fields[i-1]
+                sn = self.fields[i]
+                render_dict.update(locals())
+                if(sp.sec.msb + 1) != sn.sec.lsb:
+                    msg += "{pre}section {sn} {sp} not continuity \n".format(**render_dict)
+        return msg
+
+    def proteck_check(self):
+        msg = ""
+        return msg
+# template 
+
+VFILE = """
+module {name}_regif({io}); 
+{dec}
+endmodule
+"""
+
+WFILE = """
+module {name}_regif_wrap({io});
+{dec}
+{inst}
+{lock}
+endmodule
+"""
+
+INST = """
+{name}_regif u_{name}_regif(
+    {instports}
+);
+"""
 
 class RegIf:
     def __init__(self, regs, name, cg: bool, grpsize: int, rstmacro: int):
@@ -515,18 +430,18 @@ class RegIf:
         self.grpsize = grpsize
         self.withrstmacro = rstmacro
         self.locksigs = self.getlocksigs()
-        self.withlock = not self.locksigs
+        self.withlock = self.locksigs != []
 
     def getlocksigs(self):
         locksig = []
         for reg in self.regs:
             for field in reg.fields:
-                if not field.lock:
+                if field.lock.strip():
                     locksig.append(field.lock)
         return locksig
 
     def io_str(self):
-        pass
+        return "j"
     def dec_str(self):
         pass
     def write_str(self):
@@ -540,30 +455,17 @@ class RegIf:
     def wrap_dec_str(self):
         pass
     def wrap_inst_str(self):
-        return """
-        {name}_regif u_{name}_regif(
-            {instports}
-        );
-        """.format(**self.__dict__)
+        return INST.format(**self.__dict__)
 
     def vfile(self):
-        return """
-        module {name}_regif({iostr}); 
-        {localparam}
-        {declare}
-        {writepart}
-        {readpart}
-        endmodule
-        """.format(**self.__dict__)
+        iopart = self.io_str()
+        declare = self.dec_str()
+        return VFILE.format(io = iopart, dec = declare, **self.__dict__)
 
     def wvfile(self):
-        return """
-        module {name}_regif_wrap({iopart});
-        {declare}
-        {instance}
-        {lockpart}
-        endmodule
-        """.format(**self.__dict__)
+        return "regif_wrap.v"
+        inst = self.wrap_inst_str()
+        return WFILE.format(**self.__dict__)
 
     def dump(self, path = "./"):
         vpth = os.path.join(path, self.name + "_regif.v")
@@ -571,26 +473,6 @@ class RegIf:
         dumpfile(vpth, self.vfile())
         if self.withlock:
             dumpfile(vwpth, self.wvfile())
-
-class Field:
-    "sec/name/acc/reset/wp/lock/doc"
-    def __init__(self, fieldjs):
-        'deep copy is very important unless it will silence change fieldjs dict'
-        import copy
-        js = copy.deepcopy(fieldjs)
-        js["sec"] = js2sec(js["sec"])
-        js["reset"] = resetvalue(js["reset"])
-        self.__dict__.update(js)
-
-    def __repr__(self) -> str:
-        return self.__str__()
-    def __str__(self) -> str:
-        return "filed:{}{}".format(self.name, self.sec)
-
-    def write_str(self) -> str:
-        return ""
-    def read_str(self) -> str:
-        return ""
 
 def js2sec(js):
     return Section(js["msb"], js["lsb"])
@@ -648,6 +530,241 @@ class Acc(Enum):
     WT = 6
     WP = 7
 
+# excel load and parser
+class MSDoc():
+    def __init__(self, js):
+        from docx import Document
+        self.jsregs = js
+        self.doc = Document()
+
+    def filldoc(self):
+        from docx.shared import RGBColor
+        from docx.oxml.ns import qn
+        for name in self.jsregs:
+            body = self.jsregs[name]
+            self.doc.styles['Normal'].font.name = u'Times New Roman'
+            self.doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'Times New Roman')
+            self.doc.add_heading(u'{} ({})'.format(name, body["offset"]), 2)
+            self.doc.add_paragraph(u"Offset: {}".format(body["offset"]))
+            self.doc.add_paragraph(u"Description: {}".format(body["doc"]))
+            reg_table = self.creat_reg_table()
+            self.filltable(reg_table, body["fields"])
+
+    def creat_reg_table(self):
+        from docx.shared import Pt
+        from docx.shared import Cm
+        from docx.shared import Length
+        table_style = self.doc.styles["Table Grid"]
+        table_style.font.size = Pt(10.5)
+        table = self.doc.add_table(rows=1, cols=0, style=table_style)
+        aval_width = Length(self.doc._block_width).cm
+        table.add_column(Cm(aval_width * 0.1))
+        table.add_column(Cm(aval_width * 0.15))
+        table.add_column(Cm(aval_width * 0.1))
+        table.add_column(Cm(aval_width * 0.15))
+        table.add_column(Cm(aval_width * 0.45))
+        table.cell(0, 0).text = u"Width"
+        table.cell(0, 1).text = u"RegName"
+        table.cell(0, 2).text = u"AccType"
+        table.cell(0, 3).text = u"ResetValue"
+        table.cell(0, 4).text = u"Description"
+        return table
+
+    def filltable(self, table, fields):
+        for field in fields:
+            row_cells = table.add_row().cells
+            reserved = True if field["doc"] == "RESERVED" else False
+            row_cells[0].text = js2sec(field["sec"]).doc()
+            row_cells[1].text = field["name"]
+            row_cells[2].text = "N/A" if reserved else trystr(field["acc"])
+            row_cells[3].text = "N/A" if reserved else trystr(field["reset"])
+            row_cells[4].text = trystr(field["doc"])
+
+    def dump(self, name, dir = "./"):
+        self.doc.add_heading(u'Register Interface', 1)
+        self.filldoc()
+        path = os.path.join(dir, u"{}_Register_Manual.docx".format(name))
+        self.doc.save(path)
+        log.success("{} generate done!".format(path))
+
+# Global SingleTone Config object
+def singleton(cls):
+    instance = []
+    def single(*args, **kwargs):
+        if len(instance)==0:
+            instance.append(cls(*args, **kwargs))
+        return instance[0]
+    return single
+
+@singleton
+class GlobalConfig:
+    def __init__(self):
+        self.aw : int = 32
+        self.dw : int = 32
+        self.withcg: bool = False
+        self.withrstmacro: bool = False
+        self.groupsize: int = 0
+        self.lock_pre: str = ""
+        self.reg_pre : str = ""
+        self.hwclc : str = "_hw_clc"
+        self.hwset : str = "_hw_set"
+        self.hwsetval : str = "_hw_set_val"
+        self.outdir = "./"
+        self.regaw: int = 32
+        self.sigaw: int = 32
+        self.always_ff_begin = ALWAYS_BEGIN_MACRO if(self.withrstmacro) else ALWAYS_BEGIN
+        self.macros = RESET_MACRO if(self.withrstmacro) else ""
+        self.unlocktype = ("RO", "RC", "RWT", "RWP", "CP", "BP")
+
+    @property
+    def awmsb(self) : self.aw - 1
+    @property
+    def dwmsb(self) : self.dw - 1
+
+    def dict(self):
+        return self.__dict__
+    
+class XLSParser():
+    _regs = []
+    _js = {}
+    def __init__(self, bs):
+        self._static_check(bs)
+        self.getjson()
+        self.name         = re.match(other_format[0][3], bs.cell(2, 1).value).group()
+        self.aw           = tryint(bs.cell(3, 5).value)
+        self.dw           = tryint(bs.cell(4, 5).value)
+        self.withcg       = trybool(bs.cell(3, 10).value, "YES")
+        self.reg_pre      = trystr(bs.cell(6, 5).value).strip('"')
+        self.groupsize    = groupSize(bs.cell(4, 10).value)
+        self.withrstmacro = bs.cell(5,10).value.upper() == "YES"
+        self.regs         = json2reg(self._js)
+        self.regif        = RegIf(self.regs, self.name, self.withcg, self.groupsize, self.macros)
+        self._dynamic_check()
+
+    def __repr__(self) -> str:
+        return "\n".join([str(s) for s in self.regs])
+
+    def getjson(self):
+        def sec(s):
+            ns = str2sec(s)
+            return {"msb" : ns.msb, "lsb" : ns.lsb}
+
+        def field(t):
+            return {"sec": sec(t[0]), "name":t[1], "acc" : t[2],  "reset" : trystr(t[3]), "wp": t[4], "lock": t[5], "doc":t[6]}
+
+        def reg(x):
+            regname = x[1]
+            fields = [field(t) for t in x[4]]
+            return { regname : {
+                "offset" : intger(x[0]),
+                "doc" : x[2],
+                "fields" : fields}
+            }
+
+        def tryupdate(x):
+            key = list(x.keys())[0]
+            if key in self._js:
+                log.error("{} already exits".foramt(key))
+                exit(2)
+            self._js.update(x)
+
+        [tryupdate(reg(x)) for x in self._regs]
+
+    def getregs(self, bs):
+        nrows = bs.nrows
+        ncols = bs.ncols
+        address_idx = 0
+        for i in range(9, nrows):
+            row_data = bs.row_values(i)
+            if row_data[0] != u'':
+                self._regs.append(row_data[0:4])
+                self._regs[address_idx].append([])
+                self._regs[address_idx][4].append(row_data[4:ncols])
+                address_idx += 1
+            else:
+                self._regs[address_idx - 1][4].append(row_data[4:ncols])
+
+    def _dynamic_check(self):
+        log.info("Dynamic checking ..... ")
+        msg = ""
+        for reg in self.regs:
+            msg += reg.dynamic_check()
+        if msg:
+            msg += "\nDynamic check Fail, fixed all those format Error first, then regenerate again.\n"
+            log.warning("\n\n" + msg)
+            exit(0)
+        else:
+            log.success("Dynamic check Pass!")
+        return
+
+    def _static_check(self, bs):
+        self.getregs(bs)
+        log.info("Static checking ..... ")
+        msg = title_check(bs)
+        msg += static_check(self._regs)
+        if msg:
+            msg += "\nStatic check Fail, fixed all those format Error first, then regenerate again.\n"
+            log.warning("\n\n" + msg)
+            exit(0)
+        else:
+            log.success("Static check Pass!")
+        return
+
+    def dumpjson(self):
+        content = json.dumps(self._js, sort_keys=False, indent=4)
+        jspth = os.path.join(self.outdir, "{}.json".format(self.name))
+        dumpfile(jspth, content)
+
+    def dumpdoc(self):
+        doc = MSDoc(self._js)
+        doc.dump(self.name, self.outdir)
+
+    def dumpverilog(self):
+        self.regif.dump()
+
+    def dump(self, args):
+        self.dumpverilog()
+        if( "--doc" in args):
+            self.dumpdoc()
+        if( "--json" in args):
+            self.dumpjson()
+
+def json2reg(js):
+    regs = [Reg(name, js[name]) for name in js]
+    regnamemax = max(map(lambda x: len(x.name), regs))
+    # signamemax = max(map(lambda x: x.signamemax, regs))
+    def upalign(reg):
+        reg.align = regnamemax
+        # reg.upsigalign(signamemax)
+        return reg
+    return list(map(upalign, regs))
+
+def static_check(regs):
+    msg = ""
+    line = 0
+    regs_unq_msg, addrs_unq_msg, fields_unq_msg = ("",) * 3
+    regs_unq, addrs_unq, fields_unq = ([],) * 3
+    for reg in regs:
+        if reg[1] in addrs_unq:
+            addrs_unq_msg += "Error: position {:3}{}: Regname {:20} already exist\n".format(line + 10, chr(65 + 1), reg[1])
+        if reg[0] in regs_unq:
+            regs_unq_msg += "Error: position {:3}{}: Addrs   {:20} already exist\n".format(line + 10, chr(65 + 0), reg[0])
+        addrs_unq.append(reg[1])
+        regs_unq.append(reg[0])
+        for i in range(len(reg_format)):
+            strs = trystr(reg[i])
+            msg += format_check(strs, line, i, reg_format[i])
+        for field in reg[4]:
+            if field[1] in fields_unq and field[1] != "RESERVED":
+                fields_unq_msg += "Error: position {:3}{}: Field   {:20} already exist\n".format(line + 10, chr(65 + 4), field[1])
+            fields_unq.append(field[1])
+            for i in range(len(field_format)):
+                strs = trystr(field[i])
+                msg += format_check(strs, line, i + 4, field_format[i])
+            line += 1
+    return msg + regs_unq_msg + addrs_unq_msg + fields_unq_msg
+
+
 # argvs process
 def checkargs(args, info):
     if(len(args) == 0):
@@ -682,10 +799,14 @@ def task_creat(args):
 
 def task_ui(args):
     help = """
-    regif --init mymodule            //creat template
-    regif mymodule.xls               //generate .v
-    regif mymodule.xls --doc         //generate .v .doc
-    regif mymodule.xls --doc --json  //generate .v .doc .json
+    Welcome regif (register interface generator tools)
+
+    * regif --init mymodule            //creat template
+    * regif mymodule.xls               //generate .v
+    * regif mymodule.xls --doc         //generate .v .doc
+    * regif mymodule.xls --doc --json  //generate .v .doc .json
+    * regif mymodule.xls --html        //generate .v .html(not ready)
+    * regif mymodule.xls --pdf         //generate .v .pdf(not ready)
     """
     print(help)
 
@@ -696,8 +817,7 @@ task_entry = {
     "-h"     : task_ui, 
 }
 
-def main():
-    argvs = sys.argv[1:]
+def main(argvs):
     noargs = not argvs
     if(noargs):
         task_ui([])
@@ -710,7 +830,8 @@ def main():
 
 if __name__ == "__main__":
     try: 
-        main()
-    except:
+        argvs = sys.argv[1:]
+        main(argvs)
+    except Exception as e:
         log.error("regif crush, report to https://github.com/jijingg/regif/issues")
-        raise
+        raise e

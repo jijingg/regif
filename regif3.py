@@ -15,9 +15,8 @@
 
 import sys, os, json, shutil 
 import logging, re
+import copy
 from typing import *
-
-from docx.api import Document
 
 from regif import RWC_RST_L1
 
@@ -35,7 +34,7 @@ def checklib():
         log.error(info)
         exit(0)
     
-checklib()
+# checklib()
 
 # logging 
 class CustomFormatter(logging.Formatter):
@@ -299,7 +298,6 @@ class Field:
     "sec/name/acc/reset/wp/lock/doc"
     def __init__(self, fieldjs):
         'deep copy is very important unless it will silence change fieldjs dict'
-        import copy
         js = copy.deepcopy(fieldjs)
         js["sec"] = js2sec(js["sec"])
         self.raw_reset = js["reset"]
@@ -622,7 +620,9 @@ class GlobalConfig:
     def dwmsb(self) : self.dw - 1
 
     def dict(self):
-        return self.__dict__
+        _dict = copy.deepcopy(self.__dict__)
+        _dict.update({"awmsb": self.awmsb, "dwmsb" : self.dwmsb})
+        return _dict
     
 class XLSParser():
     _regs = []
